@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
-/// زر متدرج بينك → بنفسجي
 class GradientButton extends StatelessWidget {
   final String label;
   final IconData? icon;
@@ -74,7 +73,6 @@ class GradientButton extends StatelessWidget {
   }
 }
 
-/// كارت بنفسجي داكن بزوايا دائرية
 class DarkCard extends StatelessWidget {
   final Widget child;
   final EdgeInsets? padding;
@@ -95,31 +93,41 @@ class DarkCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final content = Container(
-      padding: padding ?? const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: gradient == null ? (color ?? AppColors.card) : null,
-        gradient: gradient,
-        borderRadius: BorderRadius.circular(radius),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
-      ),
-      child: child,
+    final decoration = BoxDecoration(
+      color: gradient == null ? (color ?? AppColors.card) : null,
+      gradient: gradient,
+      borderRadius: BorderRadius.circular(radius),
+      border: Border.all(color: Colors.white.withOpacity(0.05)),
     );
 
-    if (onTap == null) return content;
+    final innerPadding = padding ?? const EdgeInsets.all(16);
+
+    if (onTap == null) {
+      return Container(
+        padding: innerPadding,
+        decoration: decoration,
+        child: child,
+      );
+    }
 
     return Material(
       color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(radius),
-        onTap: onTap,
-        child: content,
+      borderRadius: BorderRadius.circular(radius),
+      child: Ink(
+        decoration: decoration,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(radius),
+          onTap: onTap,
+          child: Padding(
+            padding: innerPadding,
+            child: child,
+          ),
+        ),
       ),
     );
   }
 }
 
-/// شريحة معلومات صغيرة
 class InfoChip extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -150,7 +158,6 @@ class InfoChip extends StatelessWidget {
   }
 }
 
-/// صورة الشعار (تاج + نوتة)
 class LogoBadge extends StatelessWidget {
   final double size;
   const LogoBadge({super.key, this.size = 64});

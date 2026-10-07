@@ -93,11 +93,13 @@ class _HomeScreenState extends State<HomeScreen> {
                         if (!context.mounted) return;
                         Navigator.pushAndRemoveUntil(
                           context,
-                          MaterialPageRoute(builder: (_) => const AccountsScreen()),
+                          MaterialPageRoute(
+                              builder: (_) => const AccountsScreen()),
                           (_) => false,
                         );
                       },
-                      icon: const Icon(Icons.logout_rounded, color: AppColors.textDim),
+                      icon: const Icon(Icons.logout_rounded,
+                          color: AppColors.textDim),
                     ),
                   ],
                 ),
@@ -167,11 +169,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       Container(
                         width: 46,
                         height: 46,
-                        decoration: BoxDecoration(
+                        decoration: const BoxDecoration(
                           shape: BoxShape.circle,
                           gradient: AppColors.pinkGradient,
                         ),
-                        child: const Icon(Icons.person_rounded, color: Colors.white),
+                        child: const Icon(Icons.person_rounded,
+                            color: Colors.white),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -200,7 +203,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: Row(
                           children: const [
                             CircleAvatar(
-                                radius: 4, backgroundColor: AppColors.success),
+                                radius: 4,
+                                backgroundColor: AppColors.success),
                             SizedBox(width: 6),
                             Text('متصل',
                                 style: TextStyle(
@@ -393,11 +397,13 @@ class _HomeScreenState extends State<HomeScreen> {
                         onTap: () {
                           showAboutDialog(
                             context: context,
-                            applicationName: 'Free Internet / Twist Bot',
+                            applicationName: 'Free Internet',
                             applicationVersion: 'v1.0.0',
                             children: const [
-                              Text('أداة لجمع النقاط واستبدال الوحدات من Twist Music.',
-                                  style: TextStyle(color: AppColors.textDim)),
+                              Text(
+                                  'أداة لجمع النقاط واستبدال الوحدات من Twist Music.',
+                                  style:
+                                      TextStyle(color: AppColors.textDim)),
                             ],
                           );
                         },
@@ -406,30 +412,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
 
-                const SizedBox(height: 20),
-
-                // ============ الفوتر ============
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Icon(Icons.send_rounded, color: AppColors.textMute, size: 18),
-                    const Text('@X_Ahm_ed_X',
-                        style: TextStyle(
-                            color: AppColors.textMute,
-                            fontSize: 12,
-                            letterSpacing: 1)),
-                    IconButton(
-                      onPressed: () => p.toggleDarkMode(),
-                      icon: Icon(
-                        p.darkMode
-                            ? Icons.light_mode_rounded
-                            : Icons.dark_mode_rounded,
-                        color: AppColors.textMute,
-                        size: 18,
-                      ),
-                    ),
-                  ],
-                ),
+                const SizedBox(height: 24),
               ],
             ),
           ),
@@ -443,7 +426,11 @@ class _MiniTile extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
-  const _MiniTile({required this.icon, required this.label, required this.onTap});
+  const _MiniTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {

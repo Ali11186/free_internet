@@ -19,10 +19,7 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    // ننتظر تحميل الحسابات
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final p = context.read<AppProvider>();
-      // init already called in main; انتظر ثانية للانيميشن
       await Future.delayed(const Duration(milliseconds: 400));
       if (mounted) setState(() => _ready = true);
     });
@@ -60,11 +57,12 @@ class _SplashScreenState extends State<SplashScreen> {
             child: Column(
               children: [
                 const Spacer(),
-                // الشعار
                 const LogoBadge(size: 110)
                     .animate()
                     .fadeIn(duration: 500.ms)
-                    .scale(begin: const Offset(0.7, 0.7), curve: Curves.easeOutBack),
+                    .scale(
+                        begin: const Offset(0.7, 0.7),
+                        curve: Curves.easeOutBack),
                 const SizedBox(height: 22),
                 RichText(
                   text: const TextSpan(
@@ -74,11 +72,12 @@ class _SplashScreenState extends State<SplashScreen> {
                       letterSpacing: 1,
                     ),
                     children: [
-                      TextSpan(text: 'TWIST ', style: TextStyle(color: Colors.white)),
                       TextSpan(
-                        text: 'BOT',
-                        style: TextStyle(color: AppColors.pink),
-                      ),
+                          text: 'TWIST ',
+                          style: TextStyle(color: Colors.white)),
+                      TextSpan(
+                          text: 'BOT',
+                          style: TextStyle(color: AppColors.pink)),
                     ],
                   ),
                 ).animate().fadeIn(delay: 200.ms),
@@ -95,18 +94,17 @@ class _SplashScreenState extends State<SplashScreen> {
 
                 const SizedBox(height: 32),
 
-                // الميزات
                 _Feature(icon: Icons.bolt_rounded, label: 'مهام تلقائية'),
                 const SizedBox(height: 10),
                 _Feature(icon: Icons.verified_user_rounded, label: 'آمن وسريع'),
                 const SizedBox(height: 10),
                 _Feature(icon: Icons.trending_up_rounded, label: 'زيادة الرصيد'),
                 const SizedBox(height: 10),
-                _Feature(icon: Icons.card_giftcard_rounded, label: 'استبدال الوحدات'),
+                _Feature(
+                    icon: Icons.card_giftcard_rounded, label: 'استبدال الوحدات'),
 
                 const Spacer(),
 
-                // زر ابدأ
                 SizedBox(
                   width: double.infinity,
                   child: GradientButton(
@@ -116,16 +114,7 @@ class _SplashScreenState extends State<SplashScreen> {
                     loading: !_ready,
                   ),
                 ).animate().fadeIn(delay: 500.ms).slideY(begin: 0.3, end: 0),
-                const SizedBox(height: 16),
-                Text(
-                  '@X_Ahm_ed_X',
-                  style: TextStyle(
-                    color: AppColors.textMute,
-                    fontSize: 12,
-                    letterSpacing: 1,
-                  ),
-                ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 24),
               ],
             ),
           ),

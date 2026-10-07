@@ -18,7 +18,8 @@ class _ReportScreenState extends State<ReportScreen> {
   int _balance = 0;
   int _monthlyUnits = 0;
   int _remainingUnits = 0;
-  List<RedeemPackage> _packages = [];
+  List<RedeemPackage> _allPackages = [];
+  String? _error;
 
   @override
   void initState() {
@@ -27,27 +28,51 @@ class _ReportScreenState extends State<ReportScreen> {
   }
 
   Future<void> _load() async {
-    final p = context.read<AppProvider>();
-    final acc = p.currentAccount;
-    if (acc == null) return;
-
-    setState(() => _loading = true);
-    final balance = await ApiService.getBalance(acc.headers);
-    final txs = await ApiService.getHistory(acc.headers);
-    final units = _calc(txs);
-    final packages = await ApiService.getPackages(acc.headers);
-
-    if (!mounted) return;
     setState(() {
-      _balance = balance;
-      _monthlyUnits = units;
-      _remainingUnits = AppConstants.monthlyUnitLimit - units;
-      if (_remainingUnits < 0) _remainingUnits = 0;
-      _packages = packages
-          .where((p) => p.cost <= balance && p.units <= _remainingUnits)
-          .toList();
-      _loading = false;
+      _loading = true;
+      _error = null;
     });
+
+    try {
+      final p = context.read<AppProvider>();
+      final acc = p.currentAccount;
+      if (acc == null) {
+        setState(() {
+          _loading = false;
+          _error = 'الحساب غير متاح';
+        });
+        return;
+      }
+
+      // نجيب البيانات بالتوازي عشان أسرع
+      final results = await Future.wait([
+        ApiService.getBalance(acc.headers),
+        ApiService.getHistory(acc.headers),
+        ApiService.getPackages(acc.headers),
+      ]).timeout(const Duration(seconds: 25));
+
+      final balance = results[0] as int;
+      final txs = results[1] as List<Transaction>;
+      final packages = results[2] as List<RedeemPackage>;
+
+      final units = _calc(txs);
+      final remaining = (AppConstants.monthlyUnitLimit - units).clamp(0, AppConstants.monthlyUnitLimit);
+
+      if (!mounted) return;
+      setState(() {
+        _balance = balance;
+        _monthlyUnits = units;
+        _remainingUnits = remaining;
+        _allPackages = packages;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = 'فشل تحميل البيانات، حاول مرة أخرى';
+      });
+    }
   }
 
   int _calc(List<Transaction> txs) {
@@ -83,9 +108,18 @@ class _ReportScreenState extends State<ReportScreen> {
     return 0;
   }
 
+  // الباقات المتاحة حسب الرصيد + الحد المتبقي
+  List<RedeemPackage> get _available {
+    if (_remainingUnits <= 0) return [];
+    return _allPackages
+        .where((p) => p.cost <= _balance && p.units <= _remainingUnits)
+        .toList();
+  }
+
   Future<void> _redeem(RedeemPackage pkg) async {
     final acc = context.read<AppProvider>().currentAccount;
     if (acc == null) return;
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -94,16 +128,17 @@ class _ReportScreenState extends State<ReportScreen> {
         content: Text('سحب ${pkg.units} وحدة مقابل ${pkg.cost} كوينز؟'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('إلغاء',
-                  style: TextStyle(color: AppColors.textDim))),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('إلغاء', style: TextStyle(color: AppColors.textDim)),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('استبدال')),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('استبدال'),
+          ),
         ],
       ),
     );
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
 
     final messenger = ScaffoldMessenger.of(context);
     showDialog(
@@ -136,10 +171,7 @@ class _ReportScreenState extends State<ReportScreen> {
         title: const Text('استبدال الوحدات',
             style: TextStyle(fontWeight: FontWeight.w800)),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: _load,
-          ),
+          IconButton(icon: const Icon(Icons.refresh_rounded), onPressed: _load),
         ],
       ),
       body: Container(
@@ -150,253 +182,297 @@ class _ReportScreenState extends State<ReportScreen> {
             colors: [Color(0xFF2A0F45), AppColors.bg],
           ),
         ),
-        child: _loading
-            ? const Center(
-                child: CircularProgressIndicator(color: AppColors.pink))
-            : RefreshIndicator(
-                color: AppColors.pink,
-                backgroundColor: AppColors.card,
-                onRefresh: _load,
-                child: ListView(
-                  padding: const EdgeInsets.all(20),
-                  children: [
-                    // ============ بانر ============
-                    DarkCard(
-                      gradient: AppColors.pinkPurpleGradient,
-                      child: Row(
-                        children: [
-                          const Icon(Icons.card_giftcard_rounded,
-                              color: Colors.white, size: 32),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: const [
-                                Text('استبدال الوحدات',
-                                    style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w900)),
-                                SizedBox(height: 4),
-                                Text(
-                                    'حول نقاطك إلى وحدات اتصالات بسهولة وسرعة',
-                                    style: TextStyle(
-                                        color: Colors.white70, fontSize: 12)),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+        child: _buildBody(),
+      ),
+    );
+  }
 
-                    const SizedBox(height: 16),
+  Widget _buildBody() {
+    if (_loading) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(color: AppColors.pink),
+            SizedBox(height: 16),
+            Text('جاري تحميل البيانات...',
+                style: TextStyle(color: AppColors.textDim)),
+          ],
+        ),
+      );
+    }
 
-                    // ============ الرصيد ============
-                    DarkCard(
-                      child: Row(
-                        children: [
-                          const Icon(Icons.monetization_on_rounded,
-                              color: AppColors.gold, size: 40),
-                          const SizedBox(width: 14),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('رصيدك الحالي',
-                                  style: TextStyle(
-                                      color: AppColors.textDim, fontSize: 12)),
-                              const SizedBox(height: 4),
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.baseline,
-                                textBaseline: TextBaseline.alphabetic,
-                                children: [
-                                  Text('$_balance',
-                                      style: const TextStyle(
-                                        color: AppColors.text,
-                                        fontSize: 26,
-                                        fontWeight: FontWeight.w900,
-                                      )),
-                                  const SizedBox(width: 6),
-                                  const Icon(Icons.circle,
-                                      color: AppColors.gold, size: 14),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(30),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline_rounded,
+                  color: AppColors.danger, size: 60),
+              const SizedBox(height: 16),
+              Text(_error!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: AppColors.text, fontSize: 16)),
+              const SizedBox(height: 20),
+              GradientButton(
+                label: 'إعادة المحاولة',
+                icon: Icons.refresh_rounded,
+                onTap: _load,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
-                    const SizedBox(height: 14),
+    final available = _available;
 
-                    // ============ ملخص الشهر ============
-                    DarkCard(
-                      child: Column(
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              _Stat(
-                                  label: 'الحد الشهري',
-                                  value: '${AppConstants.monthlyUnitLimit}',
-                                  color: AppColors.pink),
-                              _Stat(
-                                  label: 'تم السحب',
-                                  value: '$_monthlyUnits',
-                                  color: AppColors.warning),
-                              _Stat(
-                                  label: 'المتبقي',
-                                  value: '$_remainingUnits',
-                                  color: AppColors.success),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(10),
-                            child: LinearProgressIndicator(
-                              value: _monthlyUnits / AppConstants.monthlyUnitLimit,
-                              minHeight: 8,
-                              backgroundColor: AppColors.cardAlt,
-                              valueColor: const AlwaysStoppedAnimation(
-                                  AppColors.pink),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    // ============ الباقات ============
-                    if (_remainingUnits <= 0)
-                      DarkCard(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFFB71C1C), Color(0xFF6A1B9A)],
-                        ),
-                        child: const Padding(
-                          padding: EdgeInsets.all(4),
-                          child: Text(
-                            '⚠ وصلت للحد الشهري! لا يمكنك السحب حتى الشهر القادم.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                      )
-                    else if (_packages.isEmpty)
-                      const DarkCard(
-                        child: Padding(
-                          padding: EdgeInsets.all(16),
-                          child: Text(
-                            'لا توجد باقات متاحة للرصيد أو الحد الحالي.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: AppColors.textDim),
-                          ),
-                        ),
-                      )
-                    else ...[
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 4),
-                        child: Text('الباقات المتاحة',
-                            style: TextStyle(
-                                color: AppColors.text,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w800)),
-                      ),
-                      const SizedBox(height: 10),
-                      ..._packages.map((p) => Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: DarkCard(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 14, vertical: 12),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    width: 42,
-                                    height: 42,
-                                    decoration: BoxDecoration(
-                                      gradient: AppColors.pinkGradient,
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: const Icon(Icons.sim_card_rounded,
-                                        color: Colors.white, size: 22),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text('${p.units} وحدة',
-                                            style: const TextStyle(
-                                                color: AppColors.text,
-                                                fontWeight: FontWeight.w800,
-                                                fontSize: 15)),
-                                        const SizedBox(height: 4),
-                                        Row(
-                                          children: [
-                                            const Icon(
-                                                Icons.monetization_on_rounded,
-                                                color: AppColors.gold,
-                                                size: 14),
-                                            const SizedBox(width: 4),
-                                            Text('${p.cost} نقطة',
-                                                style: const TextStyle(
-                                                    color: AppColors.textDim,
-                                                    fontSize: 12)),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  SizedBox(
-                                    height: 40,
-                                    child: ElevatedButton(
-                                      onPressed: () => _redeem(p),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: AppColors.pink,
-                                        foregroundColor: Colors.white,
-                                        shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(12)),
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 20),
-                                        elevation: 0,
-                                      ),
-                                      child: const Text('استبدال',
-                                          style: TextStyle(
-                                              fontWeight: FontWeight.w700,
-                                              fontSize: 13)),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          )),
-                    ],
-
-                    const SizedBox(height: 20),
-
-                    // ============ العودة ============
-                    OutlinedButton.icon(
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.arrow_back_rounded,
-                          color: AppColors.text),
-                      label: const Text('العودة للقائمة الرئيسية',
+    return RefreshIndicator(
+      color: AppColors.pink,
+      backgroundColor: AppColors.card,
+      onRefresh: _load,
+      child: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          // بانر
+          DarkCard(
+            gradient: AppColors.pinkPurpleGradient,
+            child: Row(
+              children: [
+                const Icon(Icons.card_giftcard_rounded,
+                    color: Colors.white, size: 32),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: const [
+                      Text('استبدال الوحدات',
                           style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w900)),
+                      SizedBox(height: 4),
+                      Text('حول نقاطك إلى وحدات اتصالات بسهولة',
+                          style: TextStyle(
+                              color: Colors.white70, fontSize: 12)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // الرصيد
+          DarkCard(
+            child: Row(
+              children: [
+                const Icon(Icons.monetization_on_rounded,
+                    color: AppColors.gold, size: 40),
+                const SizedBox(width: 14),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('رصيدك الحالي',
+                        style: TextStyle(
+                            color: AppColors.textDim, fontSize: 12)),
+                    const SizedBox(height: 4),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text('$_balance',
+                            style: const TextStyle(
                               color: AppColors.text,
-                              fontWeight: FontWeight.w700)),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        side: BorderSide(
-                            color: Colors.white.withOpacity(0.15)),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16)),
-                      ),
+                              fontSize: 26,
+                              fontWeight: FontWeight.w900,
+                            )),
+                        const SizedBox(width: 6),
+                        const Icon(Icons.circle,
+                            color: AppColors.gold, size: 14),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 14),
+
+          // ملخص الشهر
+          DarkCard(
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _Stat(
+                        label: 'الحد الشهري',
+                        value: '${AppConstants.monthlyUnitLimit}',
+                        color: AppColors.pink),
+                    _Stat(
+                        label: 'تم السحب',
+                        value: '$_monthlyUnits',
+                        color: AppColors.warning),
+                    _Stat(
+                        label: 'المتبقي',
+                        value: '$_remainingUnits',
+                        color: AppColors.success),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: LinearProgressIndicator(
+                    value: _monthlyUnits / AppConstants.monthlyUnitLimit,
+                    minHeight: 8,
+                    backgroundColor: AppColors.cardAlt,
+                    valueColor:
+                        const AlwaysStoppedAnimation(AppColors.pink),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // الحالة
+          if (_remainingUnits <= 0)
+            DarkCard(
+              gradient: const LinearGradient(
+                colors: [Color(0xFFB71C1C), Color(0xFF6A1B9A)],
+              ),
+              child: const Padding(
+                padding: EdgeInsets.all(4),
+                child: Text(
+                  '⚠ وصلت للحد الشهري! لا يمكنك السحب حتى الشهر القادم.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w700),
+                ),
+              ),
+            )
+          else if (available.isEmpty)
+            DarkCard(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    const Icon(Icons.info_outline_rounded,
+                        color: AppColors.warning, size: 40),
+                    const SizedBox(height: 12),
+                    Text(
+                      _balance < 100
+                          ? 'الرصيد أقل من 100 كوينز — اجمع المزيد أولاً'
+                          : 'لا توجد باقات مناسبة للحد المتبقي ($_remainingUnits وحدة)',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          color: AppColors.textDim, fontSize: 14),
                     ),
                   ],
                 ),
               ),
+            )
+          else ...[
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 4),
+              child: Text('الباقات المتاحة',
+                  style: TextStyle(
+                      color: AppColors.text,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800)),
+            ),
+            const SizedBox(height: 10),
+            ...available.map((p) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: DarkCard(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 12),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            gradient: AppColors.pinkGradient,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.sim_card_rounded,
+                              color: Colors.white, size: 22),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('${p.units} وحدة',
+                                  style: const TextStyle(
+                                      color: AppColors.text,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 15)),
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  const Icon(
+                                      Icons.monetization_on_rounded,
+                                      color: AppColors.gold,
+                                      size: 14),
+                                  const SizedBox(width: 4),
+                                  Text('${p.cost} نقطة',
+                                      style: const TextStyle(
+                                          color: AppColors.textDim,
+                                          fontSize: 12)),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        SizedBox(
+                          height: 40,
+                          child: ElevatedButton(
+                            onPressed: () => _redeem(p),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.pink,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 20),
+                              elevation: 0,
+                            ),
+                            child: const Text('استبدال',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )),
+          ],
+
+          const SizedBox(height: 20),
+
+          OutlinedButton.icon(
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(Icons.arrow_back_rounded, color: AppColors.text),
+            label: const Text('العودة للقائمة الرئيسية',
+                style: TextStyle(
+                    color: AppColors.text, fontWeight: FontWeight.w700)),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              side: BorderSide(color: Colors.white.withOpacity(0.15)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
+            ),
+          ),
+        ],
       ),
     );
   }

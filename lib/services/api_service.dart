@@ -99,7 +99,7 @@ class ApiService {
       final res = await http.get(
         Uri.parse('${AppConstants.apiBase}/music/user/loyalty/balance/details'),
         headers: headers,
-      ).timeout(const Duration(seconds: 12));
+      ).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         return int.tryParse((data['balance'] ?? 0).toString()) ?? 0;
@@ -127,7 +127,7 @@ class ApiService {
       final res = await http.get(
         Uri.parse('${AppConstants.apiBase}/music/user/loyalty/achievements/v2'),
         headers: headers,
-      ).timeout(const Duration(seconds: 12));
+      ).timeout(const Duration(seconds: 10));
       if (res.statusCode != 200) return [];
       final data = jsonDecode(res.body);
       final list = <Task>[];
@@ -170,28 +170,38 @@ class ApiService {
     }
   }
 
+  /// جلب السجل مع حد أقصى للصفحات لمنع التعليق
   static Future<List<Transaction>> getHistory(Map<String, String> headers) async {
     final all = <Transaction>[];
     String? token;
-    while (true) {
+    int pageCount = 0;
+    const maxPages = 20;
+
+    while (pageCount < maxPages) {
+      pageCount++;
       try {
         var url = '${AppConstants.apiBase}/music/user/loyalty/history';
         if (token != null && token.isNotEmpty) {
           url += '?paginationToken=$token';
         }
-        final res = await http.get(Uri.parse(url), headers: headers)
-            .timeout(const Duration(seconds: 12));
+        final res = await http
+            .get(Uri.parse(url), headers: headers)
+            .timeout(const Duration(seconds: 8));
         if (res.statusCode != 200) break;
+
         final data = jsonDecode(res.body);
         final list = data['data'];
         if (list is! List || list.isEmpty) break;
+
         for (final t in list) {
           if (t is Map) {
             all.add(Transaction.fromJson(Map<String, dynamic>.from(t)));
           }
         }
-        token = data['paginationTokens']?.toString();
-        if (token == null || token.isEmpty) break;
+
+        final newToken = data['paginationTokens']?.toString();
+        if (newToken == null || newToken.isEmpty || newToken == token) break;
+        token = newToken;
       } catch (_) {
         break;
       }
@@ -204,7 +214,7 @@ class ApiService {
       final res = await http.get(
         Uri.parse('${AppConstants.apiBase}/music/user/loyalty/packages'),
         headers: headers,
-      ).timeout(const Duration(seconds: 12));
+      ).timeout(const Duration(seconds: 10));
       if (res.statusCode != 200) return _fallbackPackages();
       final data = jsonDecode(res.body);
       final list = <RedeemPackage>[];
