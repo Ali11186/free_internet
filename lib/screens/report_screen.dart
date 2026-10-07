@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../models/models.dart';
 import '../providers/app_provider.dart';
@@ -19,6 +20,7 @@ class _ReportScreenState extends State<ReportScreen> {
   int _monthlyUnits = 0;
   int _remainingUnits = 0;
   List<RedeemPackage> _allPackages = [];
+  List<_WithdrawItem> _monthlyWithdrawals = [];
   String? _error;
 
   @override
@@ -44,7 +46,6 @@ class _ReportScreenState extends State<ReportScreen> {
         return;
       }
 
-      // نجيب البيانات بالتوازي عشان أسرع
       final results = await Future.wait([
         ApiService.getBalance(acc.headers),
         ApiService.getHistory(acc.headers),
@@ -55,8 +56,11 @@ class _ReportScreenState extends State<ReportScreen> {
       final txs = results[1] as List<Transaction>;
       final packages = results[2] as List<RedeemPackage>;
 
-      final units = _calc(txs);
-      final remaining = (AppConstants.monthlyUnitLimit - units).clamp(0, AppConstants.monthlyUnitLimit);
+      // نستخرج كل السحوبات الشهرية
+      final withdrawals = _extractMonthlyWithdrawals(txs);
+      final units = withdrawals.fold<int>(0, (sum, w) => sum + w.units);
+      final remaining = (AppConstants.monthlyUnitLimit - units)
+          .clamp(0, AppConstants.monthlyUnitLimit);
 
       if (!mounted) return;
       setState(() {
@@ -64,6 +68,7 @@ class _ReportScreenState extends State<ReportScreen> {
         _monthlyUnits = units;
         _remainingUnits = remaining;
         _allPackages = packages;
+        _monthlyWithdrawals = withdrawals;
         _loading = false;
       });
     } catch (e) {
@@ -75,20 +80,28 @@ class _ReportScreenState extends State<ReportScreen> {
     }
   }
 
-  int _calc(List<Transaction> txs) {
+  List<_WithdrawItem> _extractMonthlyWithdrawals(List<Transaction> txs) {
     final now = DateTime.now();
-    int total = 0;
+    final result = <_WithdrawItem>[];
     for (final t in txs) {
       if (t.date == 0) continue;
       final d = DateTime.fromMillisecondsSinceEpoch(t.date);
       if (d.year == now.year && d.month == now.month) {
         if (t.direction == 'DEBIT' && t.amount > 0) {
           final u = _extract(t.description);
-          if (u > 0) total += u;
+          if (u > 0) {
+            result.add(_WithdrawItem(
+              date: d,
+              units: u,
+              description: t.description,
+              coins: t.amount,
+            ));
+          }
         }
       }
     }
-    return total;
+    result.sort((a, b) => b.date.compareTo(a.date));
+    return result;
   }
 
   int _extract(String desc) {
@@ -108,7 +121,6 @@ class _ReportScreenState extends State<ReportScreen> {
     return 0;
   }
 
-  // الباقات المتاحة حسب الرصيد + الحد المتبقي
   List<RedeemPackage> get _available {
     if (_remainingUnits <= 0) return [];
     return _allPackages
@@ -129,7 +141,8 @@ class _ReportScreenState extends State<ReportScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('إلغاء', style: TextStyle(color: AppColors.textDim)),
+            child: const Text('إلغاء',
+                style: TextStyle(color: AppColors.textDim)),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
@@ -228,6 +241,7 @@ class _ReportScreenState extends State<ReportScreen> {
     }
 
     final available = _available;
+    final dateFmt = DateFormat('dd/MM/yyyy - HH:mm');
 
     return RefreshIndicator(
       color: AppColors.pink,
@@ -236,7 +250,7 @@ class _ReportScreenState extends State<ReportScreen> {
       child: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          // بانر
+          // ============ البانر ============
           DarkCard(
             gradient: AppColors.pinkPurpleGradient,
             child: Row(
@@ -266,7 +280,7 @@ class _ReportScreenState extends State<ReportScreen> {
 
           const SizedBox(height: 16),
 
-          // الرصيد
+          // ============ الرصيد ============
           DarkCard(
             child: Row(
               children: [
@@ -303,7 +317,7 @@ class _ReportScreenState extends State<ReportScreen> {
 
           const SizedBox(height: 14),
 
-          // ملخص الشهر
+          // ============ ملخص الشهر ============
           DarkCard(
             child: Column(
               children: [
@@ -341,7 +355,108 @@ class _ReportScreenState extends State<ReportScreen> {
 
           const SizedBox(height: 20),
 
-          // الحالة
+          // ============ سجل السحوبات الشهرية ============
+          Row(
+            children: [
+              const Icon(Icons.history_rounded,
+                  color: AppColors.pink, size: 20),
+              const SizedBox(width: 8),
+              const Text('سجل السحوبات هذا الشهر',
+                  style: TextStyle(
+                      color: AppColors.text,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800)),
+              const Spacer(),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppColors.pink.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text('${_monthlyWithdrawals.length}',
+                    style: const TextStyle(
+                        color: AppColors.pink,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          if (_monthlyWithdrawals.isEmpty)
+            DarkCard(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: const [
+                    Icon(Icons.inbox_rounded,
+                        color: AppColors.textMute, size: 40),
+                    SizedBox(height: 10),
+                    Text('لا توجد سحوبات هذا الشهر بعد',
+                        style: TextStyle(
+                            color: AppColors.textDim, fontSize: 13)),
+                  ],
+                ),
+              ),
+            )
+          else
+            ..._monthlyWithdrawals.map((w) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: DarkCard(
+                    padding: const EdgeInsets.all(14),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            color: AppColors.warning.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.arrow_upward_rounded,
+                              color: AppColors.warning, size: 22),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('-${w.units} وحدة',
+                                  style: const TextStyle(
+                                      color: AppColors.text,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 15)),
+                              const SizedBox(height: 4),
+                              Text(
+                                dateFmt.format(w.date),
+                                style: const TextStyle(
+                                    color: AppColors.textMute, fontSize: 11),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: AppColors.danger.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text('-${w.coins}',
+                              style: const TextStyle(
+                                  color: AppColors.danger,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 12)),
+                        ),
+                      ],
+                    ),
+                  ),
+                )),
+
+          const SizedBox(height: 20),
+
+          // ============ الباقات ============
           if (_remainingUnits <= 0)
             DarkCard(
               gradient: const LinearGradient(
@@ -379,13 +494,17 @@ class _ReportScreenState extends State<ReportScreen> {
               ),
             )
           else ...[
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 4),
-              child: Text('الباقات المتاحة',
-                  style: TextStyle(
-                      color: AppColors.text,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800)),
+            Row(
+              children: const [
+                Icon(Icons.sim_card_rounded,
+                    color: AppColors.pink, size: 20),
+                SizedBox(width: 8),
+                Text('الباقات المتاحة',
+                    style: TextStyle(
+                        color: AppColors.text,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800)),
+              ],
             ),
             const SizedBox(height: 10),
             ...available.map((p) => Padding(
@@ -501,4 +620,17 @@ class _Stat extends StatelessWidget {
       ],
     );
   }
+}
+
+class _WithdrawItem {
+  final DateTime date;
+  final int units;
+  final String description;
+  final int coins;
+  _WithdrawItem({
+    required this.date,
+    required this.units,
+    required this.description,
+    required this.coins,
+  });
 }
