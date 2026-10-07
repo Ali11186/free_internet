@@ -42,42 +42,85 @@ jobs:
         run: |
           mkdir -p assets
           if [ ! -f assets/icon.png ]; then
-            cat > /tmp/icon.svg << 'SVG'
-          <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-            <defs>
-              <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stop-color="#FF1493"/>
-                <stop offset="50%" stop-color="#9C27B0"/>
-                <stop offset="100%" stop-color="#7B2FF7"/>
-              </linearGradient>
-              <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="#FFEB3B"/>
-                <stop offset="100%" stop-color="#FFA000"/>
-              </linearGradient>
-            </defs>
-            <rect width="1024" height="1024" rx="220" fill="url(#bg)"/>
-            <circle cx="512" cy="380" r="180" fill="#FFFFFF" fill-opacity="0.15"/>
-            <circle cx="512" cy="380" r="130" fill="#FFFFFF" fill-opacity="0.12"/>
-            <path d="M 420 620 L 420 340 L 640 300 L 640 580
-                     C 640 620 610 640 570 640
-                     C 530 640 500 620 500 590
-                     C 500 560 530 540 570 540
-                     C 590 540 605 545 620 553
-                     L 620 400 L 440 430 L 440 620
-                     C 440 660 410 680 370 680
-                     C 330 680 300 660 300 630
-                     C 300 600 330 580 370 580
-                     C 390 580 405 585 420 593 Z"
-                  fill="#FFFFFF"/>
-            <path d="M 512 200 L 545 265 L 617 275 L 565 325 L 577 397 L 512 362
-                     L 447 397 L 459 325 L 407 275 L 479 265 Z"
-                  fill="url(#gold)" stroke="#FF8F00" stroke-width="6"/>
-            <text x="512" y="880" font-family="sans-serif" font-size="180"
-                  font-weight="900" fill="#FFFFFF" text-anchor="middle"
-                  letter-spacing="8">TWIST</text>
-          </svg>
-          SVG
-            convert -background none -density 300 /tmp/icon.svg -resize 1024x1024 assets/icon.png
+            python3 -m pip install --quiet Pillow
+            python3 << 'PY'
+          from PIL import Image, ImageDraw, ImageFont
+          import math
+
+          size = 1024
+          img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+          draw = ImageDraw.Draw(img)
+
+          # Gradient background (pink -> purple)
+          for y in range(size):
+              for x in range(size):
+                  t = (x + y) / (2 * size)
+                  if t < 0.5:
+                      t2 = t * 2
+                      r = int(0xFF + (0x9C - 0xFF) * t2)
+                      g = int(0x14 + (0x27 - 0x14) * t2)
+                      b = int(0x93 + (0xB0 - 0x93) * t2)
+                  else:
+                      t2 = (t - 0.5) * 2
+                      r = int(0x9C + (0x7B - 0x9C) * t2)
+                      g = int(0x27 + (0x2F - 0x27) * t2)
+                      b = int(0xB0 + (0xF7 - 0xB0) * t2)
+                  img.putpixel((x, y), (r, g, b, 255))
+
+          # Rounded corners mask
+          mask = Image.new('L', (size, size), 0)
+          md = ImageDraw.Draw(mask)
+          md.rounded_rectangle([0, 0, size - 1, size - 1], radius=220, fill=255)
+          bg = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+          bg.paste(img, (0, 0), mask)
+          img = bg
+          draw = ImageDraw.Draw(img)
+
+          # Glow circle
+          circle = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+          cd = ImageDraw.Draw(circle)
+          cd.ellipse([332, 200, 692, 560], fill=(255, 255, 255, 40))
+          cd.ellipse([382, 250, 642, 510], fill=(255, 255, 255, 35))
+          img = Image.alpha_composite(img, circle)
+          draw = ImageDraw.Draw(img)
+
+          # Music note (simplified: two circles + two stems + beam)
+          # Left note head
+          draw.ellipse([280, 580, 400, 700], fill=(255, 255, 255, 255))
+          # Right note head
+          draw.ellipse([580, 540, 700, 660], fill=(255, 255, 255, 255))
+          # Left stem
+          draw.rectangle([380, 340, 400, 640], fill=(255, 255, 255, 255))
+          # Right stem
+          draw.rectangle([680, 300, 700, 600], fill=(255, 255, 255, 255))
+          # Beam
+          draw.polygon([(380, 340), (700, 300), (700, 380), (380, 420)], fill=(255, 255, 255, 255))
+
+          # Crown (gold)
+          crown_pts = [
+              (420, 240), (450, 180), (480, 230), (512, 170),
+              (544, 230), (574, 180), (604, 240), (604, 290),
+              (420, 290)
+          ]
+          draw.polygon(crown_pts, fill=(255, 193, 7, 255), outline=(255, 143, 0, 255))
+          # Crown base line
+          draw.rectangle([420, 285, 604, 300], fill=(255, 152, 0, 255))
+
+          # TWIST text
+          try:
+              font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 160)
+          except:
+              font = ImageFont.load_default()
+
+          text = "TWIST"
+          bbox = draw.textbbox((0, 0), text, font=font)
+          tw = bbox[2] - bbox[0]
+          th = bbox[3] - bbox[1]
+          draw.text(((size - tw) / 2, 800 - th / 2), text, fill=(255, 255, 255, 255), font=font)
+
+          img.save('assets/icon.png', 'PNG')
+          print('Icon created:', img.size)
+          PY
           fi
           ls -lh assets/icon.png
 
