@@ -21,7 +21,9 @@ class _ReportScreenState extends State<ReportScreen> {
   int _remainingUnits = 0;
   List<RedeemPackage> _allPackages = [];
   List<_WithdrawItem> _monthlyWithdrawals = [];
+  List<Transaction> _allTx = [];
   String? _error;
+  bool _showDebug = false;
 
   @override
   void initState() {
@@ -56,7 +58,6 @@ class _ReportScreenState extends State<ReportScreen> {
       final txs = results[1] as List<Transaction>;
       final packages = results[2] as List<RedeemPackage>;
 
-      // نستخرج كل السحوبات الشهرية
       final withdrawals = _extractMonthlyWithdrawals(txs);
       final units = withdrawals.fold<int>(0, (sum, w) => sum + w.units);
       final remaining = (AppConstants.monthlyUnitLimit - units)
@@ -69,6 +70,7 @@ class _ReportScreenState extends State<ReportScreen> {
         _remainingUnits = remaining;
         _allPackages = packages;
         _monthlyWithdrawals = withdrawals;
+        _allTx = txs;
         _loading = false;
       });
     } catch (e) {
@@ -104,20 +106,35 @@ class _ReportScreenState extends State<ReportScreen> {
     return result;
   }
 
+  /// نفس منطق Python script بالظبط
   int _extract(String desc) {
+    // 1. دور على patterns
     final pats = [
       RegExp(r'(\d+)\s*وحدة\s*e&'),
       RegExp(r'(\d+)\s*وحده\s*e&'),
       RegExp(r'(\d+)\s*وحدة'),
       RegExp(r'(\d+)\s*وحده'),
-      RegExp(r'(\d+)\s*Units?'),
+      RegExp(r'(\d+)\s*Units?', caseSensitive: false),
       RegExp(r'(\d+)\s*وحدات'),
-      RegExp(r'(\d+)\s*EAND'),
+      RegExp(r'(\d+)\s*EAND', caseSensitive: false),
     ];
     for (final p in pats) {
       final m = p.firstMatch(desc);
       if (m != null) return int.tryParse(m.group(1) ?? '') ?? 0;
     }
+
+    // 2. لو فيه كلمة خصم/discount، اعتبرها 0
+    if (desc.contains('خصم') || desc.toLowerCase().contains('discount')) {
+      return 0;
+    }
+
+    // 3. fallback: أول رقم ≥ 50
+    final nums = RegExp(r'\d+').allMatches(desc);
+    if (nums.isNotEmpty) {
+      final n = int.tryParse(nums.first.group(0) ?? '') ?? 0;
+      if (n >= 50) return n;
+    }
+
     return 0;
   }
 
@@ -184,6 +201,14 @@ class _ReportScreenState extends State<ReportScreen> {
         title: const Text('استبدال الوحدات',
             style: TextStyle(fontWeight: FontWeight.w800)),
         actions: [
+          IconButton(
+            icon: Icon(_showDebug
+                ? Icons.bug_report_rounded
+                : Icons.bug_report_outlined),
+            color: _showDebug ? AppColors.pink : null,
+            tooltip: 'عرض كل المعاملات',
+            onPressed: () => setState(() => _showDebug = !_showDebug),
+          ),
           IconButton(icon: const Icon(Icons.refresh_rounded), onPressed: _load),
         ],
       ),
@@ -240,6 +265,8 @@ class _ReportScreenState extends State<ReportScreen> {
       );
     }
 
+    if (_showDebug) return _buildDebug();
+
     final available = _available;
     final dateFmt = DateFormat('dd/MM/yyyy - HH:mm');
 
@@ -250,7 +277,6 @@ class _ReportScreenState extends State<ReportScreen> {
       child: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          // ============ البانر ============
           DarkCard(
             gradient: AppColors.pinkPurpleGradient,
             child: Row(
@@ -277,10 +303,7 @@ class _ReportScreenState extends State<ReportScreen> {
               ],
             ),
           ),
-
           const SizedBox(height: 16),
-
-          // ============ الرصيد ============
           DarkCard(
             child: Row(
               children: [
@@ -314,10 +337,7 @@ class _ReportScreenState extends State<ReportScreen> {
               ],
             ),
           ),
-
           const SizedBox(height: 14),
-
-          // ============ ملخص الشهر ============
           DarkCard(
             child: Column(
               children: [
@@ -352,10 +372,9 @@ class _ReportScreenState extends State<ReportScreen> {
               ],
             ),
           ),
-
           const SizedBox(height: 20),
 
-          // ============ سجل السحوبات الشهرية ============
+          // سجل السحوبات
           Row(
             children: [
               const Icon(Icons.history_rounded,
@@ -428,11 +447,10 @@ class _ReportScreenState extends State<ReportScreen> {
                                       fontWeight: FontWeight.w800,
                                       fontSize: 15)),
                               const SizedBox(height: 4),
-                              Text(
-                                dateFmt.format(w.date),
-                                style: const TextStyle(
-                                    color: AppColors.textMute, fontSize: 11),
-                              ),
+                              Text(dateFmt.format(w.date),
+                                  style: const TextStyle(
+                                      color: AppColors.textMute,
+                                      fontSize: 11)),
                             ],
                           ),
                         ),
@@ -456,7 +474,6 @@ class _ReportScreenState extends State<ReportScreen> {
 
           const SizedBox(height: 20),
 
-          // ============ الباقات ============
           if (_remainingUnits <= 0)
             DarkCard(
               gradient: const LinearGradient(
@@ -577,7 +594,6 @@ class _ReportScreenState extends State<ReportScreen> {
           ],
 
           const SizedBox(height: 20),
-
           OutlinedButton.icon(
             onPressed: () => Navigator.pop(context),
             icon: const Icon(Icons.arrow_back_rounded, color: AppColors.text),
@@ -593,6 +609,86 @@ class _ReportScreenState extends State<ReportScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildDebug() {
+    final fmt = DateFormat('dd/MM/yyyy HH:mm');
+    // نعرض كل الـ transactions بغض النظر عن الشهر
+    final debits = _allTx.where((t) => t.direction == 'DEBIT').toList();
+    debits.sort((a, b) => b.date.compareTo(a.date));
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppColors.warning.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: const [
+              Icon(Icons.bug_report_rounded,
+                  color: AppColors.warning, size: 20),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'عرض خام لكل عمليات السحب — للتصحيح فقط',
+                  style: TextStyle(
+                      color: AppColors.warning, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text('إجمالي السجلات: ${_allTx.length} | DEBIT: ${debits.length}',
+            style: const TextStyle(color: AppColors.text, fontSize: 13)),
+        const SizedBox(height: 12),
+        ...debits.take(30).map((t) {
+          final d = t.date == 0
+              ? '-'
+              : fmt.format(DateTime.fromMillisecondsSinceEpoch(t.date));
+          final detected = _extract(t.description);
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.card,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(d,
+                        style: const TextStyle(
+                            color: AppColors.textMute, fontSize: 10)),
+                    const Spacer(),
+                    Text('amount: ${t.amount}',
+                        style: const TextStyle(
+                            color: AppColors.gold, fontSize: 11)),
+                    const SizedBox(width: 8),
+                    Text('units: $detected',
+                        style: TextStyle(
+                            color: detected > 0
+                                ? AppColors.success
+                                : AppColors.danger,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700)),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(t.description,
+                    style: const TextStyle(
+                        color: AppColors.text, fontSize: 12)),
+              ],
+            ),
+          );
+        }).toList(),
+      ],
     );
   }
 }

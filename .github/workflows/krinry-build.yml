@@ -44,9 +44,16 @@ jobs:
       - name: Create android folder
         run: flutter create --platforms android .
 
+      - name: Set app name
+        run: |
+          sed -i 's|android:label=".*"|android:label="Free Internet"|' android/app/src/main/AndroidManifest.xml
+
       - name: Add INTERNET permission
         run: |
           sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET"/>\n    <application|' android/app/src/main/AndroidManifest.xml
+
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
 
       - name: Build
         run: |
