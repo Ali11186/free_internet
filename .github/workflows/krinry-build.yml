@@ -38,6 +38,49 @@ jobs:
           flutter-version: '3.41.0'
           channel: 'stable'
 
+      - name: Generate app icon
+        run: |
+          mkdir -p assets
+          if [ ! -f assets/icon.png ]; then
+            cat > /tmp/icon.svg << 'SVG'
+          <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+            <defs>
+              <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="#FF1493"/>
+                <stop offset="50%" stop-color="#9C27B0"/>
+                <stop offset="100%" stop-color="#7B2FF7"/>
+              </linearGradient>
+              <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#FFEB3B"/>
+                <stop offset="100%" stop-color="#FFA000"/>
+              </linearGradient>
+            </defs>
+            <rect width="1024" height="1024" rx="220" fill="url(#bg)"/>
+            <circle cx="512" cy="380" r="180" fill="#FFFFFF" fill-opacity="0.15"/>
+            <circle cx="512" cy="380" r="130" fill="#FFFFFF" fill-opacity="0.12"/>
+            <path d="M 420 620 L 420 340 L 640 300 L 640 580
+                     C 640 620 610 640 570 640
+                     C 530 640 500 620 500 590
+                     C 500 560 530 540 570 540
+                     C 590 540 605 545 620 553
+                     L 620 400 L 440 430 L 440 620
+                     C 440 660 410 680 370 680
+                     C 330 680 300 660 300 630
+                     C 300 600 330 580 370 580
+                     C 390 580 405 585 420 593 Z"
+                  fill="#FFFFFF"/>
+            <path d="M 512 200 L 545 265 L 617 275 L 565 325 L 577 397 L 512 362
+                     L 447 397 L 459 325 L 407 275 L 479 265 Z"
+                  fill="url(#gold)" stroke="#FF8F00" stroke-width="6"/>
+            <text x="512" y="880" font-family="sans-serif" font-size="180"
+                  font-weight="900" fill="#FFFFFF" text-anchor="middle"
+                  letter-spacing="8">TWIST</text>
+          </svg>
+          SVG
+            convert -background none -density 300 /tmp/icon.svg -resize 1024x1024 assets/icon.png
+          fi
+          ls -lh assets/icon.png
+
       - name: Pub get
         run: flutter pub get
 
