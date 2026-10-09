@@ -1,4 +1,3 @@
-cat > ~/free_internet/lib/screens/report_screen.dart << 'EOF'
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
