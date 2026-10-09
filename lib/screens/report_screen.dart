@@ -1,3 +1,4 @@
+cat > ~/free_internet/lib/screens/report_screen.dart << 'EOF'
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -106,9 +107,7 @@ class _ReportScreenState extends State<ReportScreen> {
     return result;
   }
 
-  /// نفس منطق Python script بالظبط
   int _extract(String desc) {
-    // 1. دور على patterns
     final pats = [
       RegExp(r'(\d+)\s*وحدة\s*e&'),
       RegExp(r'(\d+)\s*وحده\s*e&'),
@@ -122,19 +121,14 @@ class _ReportScreenState extends State<ReportScreen> {
       final m = p.firstMatch(desc);
       if (m != null) return int.tryParse(m.group(1) ?? '') ?? 0;
     }
-
-    // 2. لو فيه كلمة خصم/discount، اعتبرها 0
     if (desc.contains('خصم') || desc.toLowerCase().contains('discount')) {
       return 0;
     }
-
-    // 3. fallback: أول رقم ≥ 50
     final nums = RegExp(r'\d+').allMatches(desc);
     if (nums.isNotEmpty) {
       final n = int.tryParse(nums.first.group(0) ?? '') ?? 0;
       if (n >= 50) return n;
     }
-
     return 0;
   }
 
@@ -143,6 +137,17 @@ class _ReportScreenState extends State<ReportScreen> {
     return _allPackages
         .where((p) => p.cost <= _balance && p.units <= _remainingUnits)
         .toList();
+  }
+
+  // ============ نسبة الاستخدام ============
+  double get _percentage =>
+      (_monthlyUnits / AppConstants.monthlyUnitLimit).clamp(0.0, 1.0);
+
+  // ============ الحالة ============
+  _StatusType get _status {
+    if (_remainingUnits <= 0) return _StatusType.full;
+    if (_remainingUnits < 500) return _StatusType.low;
+    return _StatusType.available;
   }
 
   Future<void> _redeem(RedeemPackage pkg) async {
@@ -180,13 +185,42 @@ class _ReportScreenState extends State<ReportScreen> {
     final ok = await ApiService.redeem(acc.headers, pkg.code);
     if (!mounted) return;
     Navigator.pop(context);
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(ok ? 'تم الاستبدال بنجاح ✓' : 'فشل الاستبدال ✗'),
-        backgroundColor: ok ? AppColors.success : AppColors.danger,
+
+    if (ok) {
+      // نعرض رسالة نجاح + نحدّث البيانات
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('✓ تم استبدال ${pkg.units} وحدة بنجاح!'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+      await _load();
+
+      // نعرض dialog فيه التقرير المحدث
+      if (mounted) _showUpdatedReport(pkg);
+    } else {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('✗ فشل الاستبدال'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+    }
+  }
+
+  void _showUpdatedReport(RedeemPackage pkg) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _UpdatedReportSheet(
+        unitsRedeemed: pkg.units,
+        monthlyUnits: _monthlyUnits,
+        remainingUnits: _remainingUnits,
+        percentage: _percentage,
+        status: _status,
       ),
     );
-    if (ok) _load();
   }
 
   @override
@@ -277,6 +311,7 @@ class _ReportScreenState extends State<ReportScreen> {
       child: ListView(
         padding: const EdgeInsets.all(20),
         children: [
+          // ============ البانر ============
           DarkCard(
             gradient: AppColors.pinkPurpleGradient,
             child: Row(
@@ -303,7 +338,10 @@ class _ReportScreenState extends State<ReportScreen> {
               ],
             ),
           ),
+
           const SizedBox(height: 16),
+
+          // ============ الرصيد ============
           DarkCard(
             child: Row(
               children: [
@@ -337,44 +375,127 @@ class _ReportScreenState extends State<ReportScreen> {
               ],
             ),
           ),
-          const SizedBox(height: 14),
+
+          const SizedBox(height: 16),
+
+          // ============ 📊 تقرير السحوبات الشهرية ============
+          Row(
+            children: const [
+              Icon(Icons.analytics_rounded, color: AppColors.pink, size: 20),
+              SizedBox(width: 8),
+              Text('تقرير السحوبات الشهرية',
+                  style: TextStyle(
+                      color: AppColors.text,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800)),
+            ],
+          ),
+          const SizedBox(height: 10),
+
           DarkCard(
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    _Stat(
-                        label: 'الحد الشهري',
-                        value: '${AppConstants.monthlyUnitLimit}',
-                        color: AppColors.pink),
-                    _Stat(
-                        label: 'تم السحب',
-                        value: '$_monthlyUnits',
-                        color: AppColors.warning),
-                    _Stat(
-                        label: 'المتبقي',
-                        value: '$_remainingUnits',
-                        color: AppColors.success),
-                  ],
+                // الصفوف
+                _ReportRow(
+                  label: 'الحد الشهري',
+                  value: '${AppConstants.monthlyUnitLimit} وحدة',
+                  valueColor: AppColors.warning,
                 ),
-                const SizedBox(height: 14),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: LinearProgressIndicator(
-                    value: _monthlyUnits / AppConstants.monthlyUnitLimit,
-                    minHeight: 8,
-                    backgroundColor: AppColors.cardAlt,
-                    valueColor:
-                        const AlwaysStoppedAnimation(AppColors.pink),
-                  ),
+                const SizedBox(height: 10),
+                _ReportRow(
+                  label: 'تم السحب',
+                  value: '$_monthlyUnits وحدة',
+                  valueColor: AppColors.danger,
+                ),
+                const SizedBox(height: 10),
+                _ReportRow(
+                  label: 'المتبقي',
+                  value: '$_remainingUnits وحدة',
+                  valueColor: AppColors.success,
+                ),
+                const SizedBox(height: 10),
+                _ReportRow(
+                  label: 'النسبة المستخدمة',
+                  value: '${(_percentage * 100).toStringAsFixed(1)}%',
+                  valueColor: AppColors.pink,
+                ),
+
+                const SizedBox(height: 16),
+
+                // Progress bar + التقدم
+                const Text('التقدم:',
+                    style: TextStyle(
+                        color: AppColors.textDim, fontSize: 12)),
+                const SizedBox(height: 8),
+
+                // Progress bar with dots
+                _ProgressBarDots(progress: _percentage),
+
+                const SizedBox(height: 16),
+
+                // الحالة
+                _StatusBox(
+                  status: _status,
+                  remainingUnits: _remainingUnits,
                 ),
               ],
             ),
           ),
+
+          const SizedBox(height: 16),
+
+          // ============ 📊 الملخص النهائي ============
+          Row(
+            children: const [
+              Icon(Icons.summarize_rounded, color: AppColors.pink, size: 20),
+              SizedBox(width: 8),
+              Text('الملخص النهائي',
+                  style: TextStyle(
+                      color: AppColors.text,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800)),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          DarkCard(
+            child: Column(
+              children: [
+                _SummaryRow(
+                  icon: Icons.account_balance_wallet_rounded,
+                  label: 'الرصيد الحالي',
+                  value: '$_balance كوينز',
+                  valueColor: AppColors.success,
+                ),
+                const Divider(color: Colors.white10, height: 20),
+                _SummaryRow(
+                  icon: Icons.arrow_downward_rounded,
+                  label: 'وحدات مسحوبة هذا الشهر',
+                  value: '$_monthlyUnits وحدة',
+                  valueColor: AppColors.danger,
+                ),
+                const Divider(color: Colors.white10, height: 20),
+                _SummaryRow(
+                  icon: Icons.hourglass_bottom_rounded,
+                  label: 'الحد المتبقي',
+                  value: '$_remainingUnits وحدة',
+                  valueColor: AppColors.success,
+                ),
+                const Divider(color: Colors.white10, height: 20),
+                _SummaryRow(
+                  icon: Icons.info_rounded,
+                  label: 'الحالة',
+                  value: _status.label,
+                  valueColor: _status.color,
+                ),
+              ],
+            ),
+          ),
+
           const SizedBox(height: 20),
 
-          // سجل السحوبات
+          // ============ سجل السحوبات ============
           Row(
             children: [
               const Icon(Icons.history_rounded,
@@ -474,6 +595,7 @@ class _ReportScreenState extends State<ReportScreen> {
 
           const SizedBox(height: 20),
 
+          // ============ الباقات ============
           if (_remainingUnits <= 0)
             DarkCard(
               gradient: const LinearGradient(
@@ -614,7 +736,6 @@ class _ReportScreenState extends State<ReportScreen> {
 
   Widget _buildDebug() {
     final fmt = DateFormat('dd/MM/yyyy HH:mm');
-    // نعرض كل الـ transactions بغض النظر عن الشهر
     final debits = _allTx.where((t) => t.direction == 'DEBIT').toList();
     debits.sort((a, b) => b.date.compareTo(a.date));
 
@@ -693,31 +814,344 @@ class _ReportScreenState extends State<ReportScreen> {
   }
 }
 
-class _Stat extends StatelessWidget {
+// ============ Status ============
+enum _StatusType { available, low, full }
+
+extension on _StatusType {
+  Color get color {
+    switch (this) {
+      case _StatusType.full:
+        return AppColors.danger;
+      case _StatusType.low:
+        return AppColors.warning;
+      case _StatusType.available:
+        return AppColors.success;
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case _StatusType.full:
+        return 'وصلت للحد ⛔';
+      case _StatusType.low:
+        return 'قاربت على الانتهاء ⚠️';
+      case _StatusType.available:
+        return 'متاح ✅';
+    }
+  }
+
+  String get message {
+    switch (this) {
+      case _StatusType.full:
+        return 'لقد وصلت للحد الشهري! (2000 وحدة)';
+      case _StatusType.low:
+        return 'تبقى أقل من 500 وحدة!';
+      case _StatusType.available:
+        return 'الحد متاح للسحب';
+    }
+  }
+}
+
+// ============ تقرير - صف ============
+class _ReportRow extends StatelessWidget {
   final String label;
   final String value;
-  final Color color;
-  const _Stat({
+  final Color valueColor;
+  const _ReportRow({
     required this.label,
     required this.value,
-    required this.color,
+    required this.valueColor,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return Row(
       children: [
+        Expanded(
+          child: Text(label,
+              style: const TextStyle(
+                  color: AppColors.textDim, fontSize: 13)),
+        ),
         Text(value,
             style: TextStyle(
-                color: color, fontSize: 20, fontWeight: FontWeight.w900)),
-        const SizedBox(height: 4),
-        Text(label,
-            style: const TextStyle(color: AppColors.textDim, fontSize: 11)),
+                color: valueColor,
+                fontSize: 14,
+                fontWeight: FontWeight.w800)),
       ],
     );
   }
 }
 
+// ============ Progress bar with dots ============
+class _ProgressBarDots extends StatelessWidget {
+  final double progress;
+  const _ProgressBarDots({required this.progress});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (context, constraints) {
+      final barWidth = constraints.maxWidth;
+      final filledWidth = barWidth * progress;
+
+      return Stack(
+        children: [
+          // الخلفية
+          Container(
+            height: 12,
+            decoration: BoxDecoration(
+              color: AppColors.cardAlt,
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+          // الممتلئ
+          Container(
+            height: 12,
+            width: filledWidth,
+            decoration: BoxDecoration(
+              gradient: AppColors.pinkGradient,
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.pink.withOpacity(0.5),
+                  blurRadius: 10,
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    });
+  }
+}
+
+// ============ Status box ============
+class _StatusBox extends StatelessWidget {
+  final _StatusType status;
+  final int remainingUnits;
+  const _StatusBox({required this.status, required this.remainingUnits});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: status.color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: status.color.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                status == _StatusType.full
+                    ? Icons.block_rounded
+                    : status == _StatusType.low
+                        ? Icons.warning_amber_rounded
+                        : Icons.check_circle_rounded,
+                color: status.color,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  status.message,
+                  style: TextStyle(
+                      color: status.color,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
+          if (status != _StatusType.full && remainingUnits > 0) ...[
+            const SizedBox(height: 6),
+            Text(
+              'ℹ️  يمكنك سحب $remainingUnits وحدة هذا الشهر',
+              style: const TextStyle(
+                  color: AppColors.textDim, fontSize: 12),
+            ),
+          ],
+          if (status == _StatusType.full) ...[
+            const SizedBox(height: 6),
+            const Text(
+              '❌ لا يمكنك سحب المزيد حتى الشهر القادم',
+              style: TextStyle(color: AppColors.textDim, fontSize: 12),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ============ Summary row ============
+class _SummaryRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color valueColor;
+  const _SummaryRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.valueColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, color: valueColor, size: 18),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(label,
+              style: const TextStyle(
+                  color: AppColors.textDim, fontSize: 13)),
+        ),
+        Text(value,
+            style: TextStyle(
+                color: valueColor,
+                fontSize: 13,
+                fontWeight: FontWeight.w800)),
+      ],
+    );
+  }
+}
+
+// ============ Bottom sheet: التقرير المحدث بعد الاستبدال ============
+class _UpdatedReportSheet extends StatelessWidget {
+  final int unitsRedeemed;
+  final int monthlyUnits;
+  final int remainingUnits;
+  final double percentage;
+  final _StatusType status;
+
+  const _UpdatedReportSheet({
+    required this.unitsRedeemed,
+    required this.monthlyUnits,
+    required this.remainingUnits,
+    required this.percentage,
+    required this.status,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      padding: const EdgeInsets.all(22),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Drag handle
+          Container(
+            width: 50,
+            height: 5,
+            decoration: BoxDecoration(
+              color: AppColors.textMute,
+              borderRadius: BorderRadius.circular(3),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // أيقونة النجاح
+          Container(
+            width: 70,
+            height: 70,
+            decoration: BoxDecoration(
+              gradient: AppColors.pinkGradient,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.pink.withOpacity(0.5),
+                  blurRadius: 20,
+                ),
+              ],
+            ),
+            child: const Icon(Icons.check_rounded,
+                color: Colors.white, size: 40),
+          ),
+          const SizedBox(height: 16),
+
+          Text('تم استبدال $unitsRedeemed وحدة',
+              style: const TextStyle(
+                  color: AppColors.text,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900)),
+
+          const SizedBox(height: 24),
+
+          // التقرير المحدث
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.bg,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.analytics_rounded,
+                        color: AppColors.pink, size: 18),
+                    SizedBox(width: 8),
+                    Text('التقرير المحدث',
+                        style: TextStyle(
+                            color: AppColors.text,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800)),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                _ReportRow(
+                  label: 'الحد الشهري',
+                  value: '${AppConstants.monthlyUnitLimit} وحدة',
+                  valueColor: AppColors.warning,
+                ),
+                const SizedBox(height: 10),
+                _ReportRow(
+                  label: 'تم السحب',
+                  value: '$monthlyUnits وحدة',
+                  valueColor: AppColors.danger,
+                ),
+                const SizedBox(height: 10),
+                _ReportRow(
+                  label: 'المتبقي',
+                  value: '$remainingUnits وحدة',
+                  valueColor: AppColors.success,
+                ),
+                const SizedBox(height: 14),
+                _ProgressBarDots(progress: percentage),
+                const SizedBox(height: 14),
+                _StatusBox(
+                    status: status, remainingUnits: remainingUnits),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          SizedBox(
+            width: double.infinity,
+            child: GradientButton(
+              label: 'تمام',
+              icon: Icons.check_rounded,
+              onTap: () => Navigator.pop(context),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
+// ============ Helpers ============
 class _WithdrawItem {
   final DateTime date;
   final int units;
@@ -730,3 +1164,4 @@ class _WithdrawItem {
     required this.coins,
   });
 }
+EOF
