@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'providers/app_provider.dart';
 import 'theme/app_theme.dart';
+import 'widgets/vpn_guard.dart';
 import 'screens/splash_screen.dart';
 
 void main() {
@@ -26,7 +27,9 @@ class FreeInternetApp extends StatelessWidget {
         builder: (context, child) {
           return DefaultTextStyle(
             style: GoogleFonts.cairo(fontSize: 14, color: AppColors.text),
-            child: child ?? const SizedBox.shrink(),
+            child: VpnGuard(
+              child: child ?? const SizedBox.shrink(),
+            ),
           );
         },
         home: const SplashScreen(),
