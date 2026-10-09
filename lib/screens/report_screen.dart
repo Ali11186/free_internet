@@ -1163,4 +1163,3 @@ class _WithdrawItem {
     required this.coins,
   });
 }
-EOF
