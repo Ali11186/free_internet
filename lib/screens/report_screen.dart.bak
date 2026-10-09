@@ -107,7 +107,28 @@ class _ReportScreenState extends State<ReportScreen> {
   }
 
   int _extract(String desc) {
-    final ad='٠١٢٣٤٥٦٧٨٩'; final wd='0123456789'; final b=StringBuffer(); for (final r in desc.runes) { final ch=String.fromCharCode(r); final i=ad.indexOf(ch); b.write(i>=0?wd[i]:ch); } final t=b.toString(); final ps=[RegExp(r'([0-9]+).*?وحدة'), RegExp(r'([0-9]+).*?وحده'), RegExp(r'([0-9]+).*?وحدات'), RegExp(r'([0-9]+).*?Units?', caseSensitive: false), RegExp(r'([0-9]+).*?EAND', caseSensitive: false)]; for (final p in ps) { final m=p.firstMatch(t); if (m!=null) { final v=int.tryParse(m.group(1)??'')??0; if (v>0) return v; } } if (t.contains('خصم')) return 0; for (final m in RegExp(r'[0-9]+').allMatches(t)) { final n=int.tryParse(m.group(0)??'')??0; if (n>=50) return n; } return 0;
+    final pats = [
+      RegExp(r'(\d+)\s*وحدة\s*e&'),
+      RegExp(r'(\d+)\s*وحده\s*e&'),
+      RegExp(r'(\d+)\s*وحدة'),
+      RegExp(r'(\d+)\s*وحده'),
+      RegExp(r'(\d+)\s*Units?', caseSensitive: false),
+      RegExp(r'(\d+)\s*وحدات'),
+      RegExp(r'(\d+)\s*EAND', caseSensitive: false),
+    ];
+    for (final p in pats) {
+      final m = p.firstMatch(desc);
+      if (m != null) return int.tryParse(m.group(1) ?? '') ?? 0;
+    }
+    if (desc.contains('خصم') || desc.toLowerCase().contains('discount')) {
+      return 0;
+    }
+    final nums = RegExp(r'\d+').allMatches(desc);
+    if (nums.isNotEmpty) {
+      final n = int.tryParse(nums.first.group(0) ?? '') ?? 0;
+      if (n >= 50) return n;
+    }
+    return 0;
   }
 
   List<RedeemPackage> get _available {
